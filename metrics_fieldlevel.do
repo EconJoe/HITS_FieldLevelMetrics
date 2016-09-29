@@ -75,14 +75,15 @@ keep if pubyear==vintage
 
 * Compute the total number of articles that originate each ngram
 * Recall that the meshid4_weights sum to 1 within each article. Thus, by summing the weight over the
-*  Ngrams, we get the total count of articles that used each n-gram.
+*  Ngrams, we get the total count of articles that used each n-gram. 
+*  This is just a compuational trick--we could just count the number of PMIDs for each n-gram and then merge datasets
 by ngramid, sort: egen articlecount=total(mesh4_weight)
 
 * Normalize the number of fractionalized articles that belong to each ngram-yearbin-meshid cell by the total number
 *  of articles that originate each ngram.
 * This ensures that the total weight sums to 1 for each ngram. We distribute this normalized weight across meshids.
 * This will ensure that the sum of top concept births across yearbins and meshids
-*  equal the actual total number of top concepts (10,128 in our case).
+*  equal the actual total number of top concepts (14,447 in our case).
 gen concepts=mesh4_weight/articlecount
 
 * Transform the concept vintages into 5-year period year bins
@@ -95,17 +96,13 @@ replace yearbin="2003-2007" if vintage>=2003 & vintage<=2007
 replace yearbin="2008-2012" if vintage>=2008 & vintage<=2012
 
 * Compute the number of fractionalized articles that belong each ngram-yearbin-meshid cell.
-collapse (sum) concepts, by(yearbin meshid)
+collapse (sum) concepts, by(yearbin meshid) fast
 
 sort meshid yearbin
 compress
 save metrics_concepts_new, replace
 export delimited using "metrics_concepts_new.csv", replace
-
-rename concepts concepts_new
-merge 1:1 meshid4 yearbin using metrics_concepts
 *******************************************************************
-
 
 
 *******************************************************************
@@ -139,7 +136,7 @@ replace yearbin="1998-2002" if pubyear>=1998 & pubyear<=2002
 replace yearbin="2003-2007" if pubyear>=2003 & pubyear<=2007
 replace yearbin="2008-2012" if pubyear>=2008 & pubyear<=2012
 
-* For each meshid4 field and yearbin, compute the total number of (weight and unweighted) mentions of a top concept
+* For each meshid4 field and yearbin, compute the total number of (weighted and unweighted) mentions of a top concept
 * This can be thought of as being computed in two different, but equivalent ways:
 *   1) A) Fix a ngram. Determine the number of PMIDs belonging to each meshid4-yearbin that mention the ngram. 
 *         collapse (sum) mentions_*, by(yearbin meshid4 ngramid vintage)
@@ -147,26 +144,17 @@ replace yearbin="2008-2012" if pubyear>=2008 & pubyear<=2012
 *         collapse (sum) mentions_*, by(yearbin meshid4)
 *
 *   2) A) Fix a PMID. Determine the number of ngrams it uses in each mesh4id and yearbin. 
-*         collapse (sum) mentions_*, by(yearbin meshid4 pmid pubyear)
+*         collapse (sum) mentions_*, by(yearbin meshid4 pmid yearbin)
 *      B) Sum the number of fractionalized mentions over all PMIDs 
 *         collapse (sum) mentions_*, by(yearbin meshid4)
 * Obviously this can all be combined into a single equivalent step: collapse (sum) mentions_*, by(yearbin meshid4)
 
-collapse (sum) bment_*, by(yearbin meshid4)
+collapse (sum) bment_*, by(yearbin meshid4) fast
 
 sort meshid4 yearbin
 compress
 save metrics_bment_total_new, replace
 export delimited using "metrics_bment_total_new.csv", replace
-
-local vals 0 3 5 10
-foreach i in `vals' {
-	rename bment_`i'_total_frac bment_`i'_total_frac_new
-	rename bment_`i'_total_raw bment_`i'_total_raw_new
-}
-rename bment_all_total_frac bment_all_total_frac
-rename bment_all_total_raw bment_all_total_raw
-merge 1:1 meshid4 yearbin using metrics_bment_total
 *******************************************************************************
 
 
@@ -249,43 +237,27 @@ keep ngramid meshid4 bment_*
 compress
 collapse (sum) bment_*, by(ngramid meshid4)
 
-* Compute the herfindhals for both  the fractionalized and non-fractionalized (raw) mentions.
-* In this situation, an ngramid is an "industry" and a meshid4 is a "firm" within the industry. We want to know
-*   how concentrated the industry (i.e. ngram) is. The higher the number the more concentrated.
-by ngramid, sort: egen total=total(bment_all_total_frac)
-gen fherf_frac_un=(bment_all_total_frac/total)^2
-drop total
-by ngramid, sort: egen total=total(bment_all_total_raw)
-gen fherf_raw_un=(bment_all_total_raw/total)^2
-drop total
-keep ngramid fherf_*
-compress
-collapse (sum) fherf_*, by(ngramid)
+joinby ngramid using metrics_fherfment_new, unmatched(both)
+* WHY ARE THERE SOME ONLY IN MASTER???
+save test, replace
+drop _merge
 
-merge 1:m ngramid using metrics_fherfment_new
-* Some miss because of the difference betweeen year and pubyear.
-drop if _merge==1
-order ngram meshid yearbin weight_v fherf_*
+order meshid4_vintage weight_vintage ngramid
+sort meshid4_vintage ngramid meshid4
 
-* Weight the fractionalized and raw herfindahls by their vintage weight across fields.
-gen fherf_frac_w=fherf_frac_un*weight_vintage
-gen fherf_raw_w=fherf_raw_un*weight_vintage
+gen test=bment_all_total_frac*weight_vintage
+by meshid4_vintage yearbin, sort: egen total=total(test)
 
-* Compute the mean herfindhals over ngrams for each field and year bin
-collapse (mean) fherf_*, by(meshid4_vintage yearbin)
+gen prop=test/total
+gen herfindahl=prop^2
+
+collapse (sum) herfindahl, by(meshid4_vintage yearbin) fast
 rename meshid4_vintage meshid4
 
 sort meshid yearbin
 compress
 save metrics_fherfment_new, replace
 export delimited using "metrics_fherfment_new.csv", replace
-
-rename fherf_frac_un fherf_frac_un_new
-rename fherf_raw_un fherf_raw_un_new
-rename fherf_frac_w fherf_frac_w_new
-rename fherf_raw_w fherf_raw_w_new
-merge 1:1 meshid4 yearbin using metrics_fherfment
-
 *******************************************************
 
 
@@ -326,8 +298,8 @@ replace yearbin="2008-2012" if pubyear>=2008 & pubyear<=2012
 
 * Note that unlike when computing the mentions metrics, we cannot directly collapse to the field yearbin.
 * To compute the backward Herfindahls, we need to take the intermediate step of collapsing to the ngram-field-yearbin. At this
-*  level we compute the Herfindahls.
-collapse (sum) mentions_*, by(ngram meshid4 yearbin)
+*  level we compute the Herfindahls. Note that we are summing over the articles.
+collapse (sum) mentions_*, by(ngram meshid4 yearbin) fast
 
 *save test1, replace
 *use test1, clear
