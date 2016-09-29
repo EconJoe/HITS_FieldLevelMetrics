@@ -5,7 +5,7 @@
 * User must set the outpath and the inpath.
 global inpath="B:\Research\RAWDATA\MEDLINE\2014\Processed"
 global inpath2="B:\Research\RAWDATA\MeSH\2014\Parsed"
-global outpath="B:\Research\Projects\HITS\HITS5\FieldLevel\Data"
+global outpath="B:\Research\Projects\HITS\HITS6\FieldLevel\Data"
 **************************************************************************************************
 
 
@@ -15,11 +15,11 @@ global outpath="B:\Research\Projects\HITS\HITS5\FieldLevel\Data"
 
 * Obtain just the top 0.01 percent of concepts and the PMIDs that use them.
 cd $inpath
-use ngrams_top_new, clear
+use ngrams_top, clear
 keep if top_0001==1
 keep ngramid
 * Identifiy all of the articles that use one of the top 0.01 percent of concepts
-merge 1:m ngramid using ngrams_top_pmids_001_new
+merge 1:m ngramid using ngrams_top_pmids_001
 drop if _merge==2
 drop _merge
 
@@ -39,14 +39,6 @@ local startpubyear=1983
 local endpubyear=2012
 drop if pubyear<`startpubyear' | pubyear>`endpubyear'
 
-keep ngramid pmid pubyear version vintage
-order ngramid vintage pmid version pubyear
-sort vintage ngramid pmid version
-compress
-* Observations are uniquely identified by a top ngram and a PMID that uses that top ngram.
-cd $outpath
-save temp1_ngrampmid_new, replace
-
 * Attach the 4-digit MeSH terms and their weights to each article
 cd $inpath
 joinby pmid version using medline14_mesh_clean, unmatched(master)
@@ -57,7 +49,7 @@ sort vintage ngramid pmid version
 compress
 * Observations are uniquely identified by a top ngram, a PMID that uses that top ngram, and the mesh4 fields that tag the PMID
 cd $outpath
-save temp2_ngrampmidmesh4_new, replace
+save temp_ngrampmidmesh4, replace
 *******************************************************************
 *******************************************************************
 
@@ -69,7 +61,7 @@ cd $outpath
 * TOP CONCEPT BIRTHS
 
 * Import tempfile. Recall that concept vintages range from 1973-2012 and there is no restriction on pubyear.
-use temp2_ngrampmidmesh4_new, clear
+use temp_ngrampmidmesh4, clear
 
 * Keep only articles that are published in the concept's vintage year.
 * These are the "originators" of the concept.
@@ -102,8 +94,7 @@ collapse (sum) concepts, by(yearbin meshid) fast
 
 sort meshid yearbin
 compress
-save metrics_concepts_new, replace
-export delimited using "metrics_concepts_new.csv", replace
+save metrics_concepts, replace
 *******************************************************************
 
 
@@ -112,7 +103,7 @@ export delimited using "metrics_concepts_new.csv", replace
 * TOP CONCEPT TOTAL MENTIONS
 
 * Import tempfile. Recall that concept vintages range from 1973-2012 and there is no restriction on pubyear.
-use temp2_ngrampmidmesh4_new, clear
+use temp_ngrampmidmesh4, clear
 
 * Identify articles that use a top concept within `i' years of the concept's vintage.
 local vals 0 3 5 10
@@ -155,8 +146,7 @@ collapse (sum) bment_*, by(yearbin meshid4) fast
 
 sort meshid4 yearbin
 compress
-save metrics_bment_total_new, replace
-export delimited using "metrics_bment_total_new.csv", replace
+save metrics_bment_total, replace
 *******************************************************************************
 
 
@@ -179,7 +169,7 @@ export delimited using "metrics_bment_total_new.csv", replace
 
 ******************** STEP 1 ***************************
 * Import tempfile. Recall that concept vintages range from 1973-2012 and there is no restriction on pubyear.
-use temp2_ngrampmidmesh4_new, clear
+use temp_ngrampmidmesh4, clear
 
 * Keep only articles that are published in the concept's vintage year.
 * These are the "originators" of the concept.
@@ -219,7 +209,7 @@ compress
 *by ngramid, sort: egen total=total(weight_vintage)
 *tab total
 
-save metrics_fherfment_new, replace
+save metrics_fherfment, replace
 *******************************************************
 
 
@@ -228,7 +218,7 @@ save metrics_fherfment_new, replace
 set more off
 
 * Import tempfile. Recall that concept vintages range from 1973-2012 and there is no restriction on pubyear.
-use temp2_ngrampmidmesh4_new, clear
+use temp_ngrampmidmesh4, clear
 
 * These commented out commmads simply represent how best to view data in a human-readable form
 *keep ngramid pmid meshid4 pubyear vintage weight
@@ -246,7 +236,9 @@ compress
 collapse (sum) bment_*, by(ngramid meshid4) fast
 sort ngramid meshid4
 
-joinby ngramid using metrics_fherfment_new, unmatched(both)
+set more off
+
+joinby ngramid using metrics_fherfment, unmatched(both)
 * _merge==1 means that the article had no raw MeSH terms that could be transformed into 4-digit MeSH terms. Drop these.
 save test, replace
 drop if _merge==1
@@ -272,13 +264,8 @@ rename meshid4_vintage meshid4
 
 sort meshid yearbin
 compress
-save metrics_fherfment_new, replace
-export delimited using "metrics_fherfment_new.csv", replace
+save metrics_fherfment, replace
 *******************************************************
-
-
-
-
 
 
 
@@ -287,7 +274,7 @@ export delimited using "metrics_fherfment_new.csv", replace
 * HERFINDAHL (Backward-looking)
 
 * Import tempfile. Recall that concept vintages range from 1973-2012 and there is no restriction on pubyear.
-use temp2_ngrampmidmesh4_new, clear
+use temp_ngrampmidmesh4, clear
 keep ngramid pmid meshid4 pubyear vintage mesh4_weight
 
 * Identify articles that use a top concept within `i' years of the concept's vintage.
@@ -377,37 +364,24 @@ replace bherf_raw_all=. if bherf_raw_all==0
 
 sort meshid yearbin
 compress
-save metrics_bherfment_new, replace
-export delimited using "metrics_bherfment_new.csv", replace
+save metrics_bherfment, replace
 *******************************************************
 
 
-use metrics_concepts_new, clear
-merge 1:1 meshid4 yearbin using metrics_bment_total_new
-drop _merge
-sort meshid yearbin
-replace concept=0 if concept==.
-drop *_raw
-rename bment_0_total_frac bment_0
-rename bment_3_total_frac bment_3
-rename bment_5_total_frac bment_5
-rename bment_10_total_frac bment_10
-rename bment_all_total_frac bment_all
-merge 1:1 meshid4 yearbin using metrics_fherfment_new
-drop _merge
-drop *_raw
-rename fherf_frac fherf_ment
-sort meshid yearbin
-keep meshid4 yearbin concepts bment_* fherf
-merge 1:1 meshid4 yearbin using metrics_bherfment_new
-keep meshid4 yearbin concepts bment_* fherf_ment bherf_frac*
-rename bherf_frac_0 bherf_ment_0
-rename bherf_frac_3 bherf_ment_3
-rename bherf_frac_5 bherf_ment_5
-rename bherf_frac_10 bherf_ment_10
-rename bherf_frac_all bherf_ment_all
 
-save metrics_topconcept_fieldlevel_new, replace
+*******************************************************
+*******************************************************
+* Combine and output all metrics
+use metrics_concepts, clear
+merge 1:1 meshid4 yearbin using metrics_bment_total
+drop _merge
+replace concept=0 if concept==.
+merge 1:1 meshid4 yearbin using metrics_fherfment
+drop _merge
+merge 1:1 meshid4 yearbin using metrics_bherfment
+drop _merge
+
+save metrics_topconcept_fieldlevel, replace
 
 cd $inpath2
 import delimited using "desc2014_meshtreenumbers.txt", clear delimiter(tab) varnames(1)
@@ -436,17 +410,56 @@ keep yearbin meshid mesh
 rename meshid meshid4
 
 cd $outpath
-merge 1:1 meshid4 yearbin using metrics_topconcept_fieldlevel_new
+merge 1:1 meshid4 yearbin using metrics_topconcept_fieldlevel
 drop if _merge==2
 drop _merge
 
-replace concepts=0 if concepts==.
-replace bment_0=0 if  bment_0==.
-replace bment_3=0 if  bment_3==.
-replace bment_5=0 if  bment_5==.
-replace bment_10=0 if  bment_10==.
-replace bment_all=0 if  bment_all==.
+replace concepts=0 if concepts==. 
+replace bment_0_total_frac=0 if bment_0_total_frac==.
+replace bment_0_total_raw=0 if bment_0_total_raw==.
+replace bment_3_total_frac=0 if bment_3_total_frac==.
+replace bment_3_total_raw=0 if bment_3_total_raw==.
+replace bment_5_total_frac=0 if bment_5_total_frac==.
+replace bment_5_total_raw=0 if bment_5_total_raw==.
+replace bment_10_total_frac=0 if bment_10_total_frac==.
+replace bment_10_total_raw=0 if bment_10_total_raw==.
+replace bment_all_total_frac=0 if bment_all_total_frac==.
+replace bment_all_total_raw=0 if bment_all_total_raw==.
 
-save metrics_topconcept_fieldlevel_new, replace
-export delimited using "metrics_topconcept_fieldlevel_new.csv", replace
+order meshid4 yearbin
+sort meshid4 yearbin
+compress
+save metrics_topconcept_fieldlevel, replace
+export delimited using "metrics_topconcept_fieldlevel.csv", replace
+*******************************************************
+
+*******************************************************
+*******************************************************
+* Simply for paper by dropping and renaming some variables
+use metrics_topconcept_fieldlevel, clear
+
+drop *_raw *_raw_*
+rename bment_0_total_frac bment_0
+rename bment_3_total_frac bment_3
+rename bment_5_total_frac bment_5
+rename bment_10_total_frac bment_10
+rename bment_all_total_frac bment_all
+rename fherf_frac fherf_ment
+rename bherf_frac_0 bherf_ment_0
+rename bherf_frac_3 bherf_ment_3
+rename bherf_frac_5 bherf_ment_5
+rename bherf_frac_10 bherf_ment_10
+rename bherf_frac_all bherf_ment_all
+
+order meshid4 yearbin
+sort meshid4 yearbin
+compress
+save metrics_topconcept_fieldlevel_paper, replace
+export delimited using "metrics_topconcept_fieldlevel_paper.csv", replace
+*******************************************************
+
+
+
+
+
 
