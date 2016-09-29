@@ -18,10 +18,12 @@ cd $inpath
 use ngrams_top_new, clear
 keep if top_0001==1
 keep ngramid
+* Identifiy all of the articles that use one of the top 0.01 percent of concepts
 merge 1:m ngramid using ngrams_top_pmids_001_new
 drop if _merge==2
 drop _merge
 
+* Only keep the articles that are both in MEDLINE and WOS
 cd $inpath
 merge m:1 pmid using medline_wos_intersection
 keep if _merge==3
@@ -203,13 +205,19 @@ replace yearbin="1998-2002" if vintage>=1998 & vintage<=2002
 replace yearbin="2003-2007" if vintage>=2003 & vintage<=2007
 replace yearbin="2008-2012" if vintage>=2008 & vintage<=2012
 
-* Compute the number of fractionalized articles that belong each ngram-yearbin-meshid cell.
+* Compute the number of normalized fractionalized articles that belong each ngram-yearbin-meshid cell.
+* This will serve as a weight later on. The idea is that fields that are important in originating an n-gram
+* will receive more weight.
+* Note that the weights across mesh terms sum to 1 for a given n-gram.
 collapse (sum) weight_vintage, by(ngramid yearbin meshid)
 
 rename meshid4 meshid4_vintage
-order meshid4_vintage yearbin weight_vintage ngramid
-sort meshid4_vintage yearbin ngramid
+order ngramid meshid4_vintage yearbin weight_vintage 
+sort ngramid meshid4_vintage yearbin
 compress
+* Note that the weights across mesh terms sum to 1 for a given n-gram.
+*by ngramid, sort: egen total=total(weight_vintage)
+*tab total
 
 save metrics_fherfment_new, replace
 *******************************************************
@@ -235,23 +243,31 @@ gen bment_all_total_raw=1
 * Sum the mentions (both fractionalized and non-fractionalized (raw)) across all ngrams and fields
 keep ngramid meshid4 bment_*
 compress
-collapse (sum) bment_*, by(ngramid meshid4)
+collapse (sum) bment_*, by(ngramid meshid4) fast
+sort ngramid meshid4
 
 joinby ngramid using metrics_fherfment_new, unmatched(both)
-* WHY ARE THERE SOME ONLY IN MASTER???
+* _merge==1 means that the article had no raw MeSH terms that could be transformed into 4-digit MeSH terms. Drop these.
 save test, replace
+drop if _merge==1
 drop _merge
 
 order meshid4_vintage weight_vintage ngramid
 sort meshid4_vintage ngramid meshid4
 
-gen test=bment_all_total_frac*weight_vintage
-by meshid4_vintage yearbin, sort: egen total=total(test)
+* Weight the backward mentions by the wintage weights.  The idea is to downweight fields that
+*  were not as important in originating the n-gram.
+gen fherf_frac=bment_all_total_frac*weight_vintage
+by meshid4_vintage yearbin, sort: egen total=total(fherf_frac)
+replace fherf_frac=(fherf_frac/total)^2
+drop total
 
-gen prop=test/total
-gen herfindahl=prop^2
+gen fherf_raw=bment_all_total_raw*weight_vintage
+by meshid4_vintage yearbin, sort: egen total=total(fherf_raw)
+replace fherf_raw=(fherf_raw/total)^2
+drop total
 
-collapse (sum) herfindahl, by(meshid4_vintage yearbin) fast
+collapse (sum) fherf_*, by(meshid4_vintage yearbin) fast
 rename meshid4_vintage meshid4
 
 sort meshid yearbin
@@ -379,9 +395,10 @@ rename bment_10_total_frac bment_10
 rename bment_all_total_frac bment_all
 merge 1:1 meshid4 yearbin using metrics_fherfment_new
 drop _merge
+drop *_raw
+rename fherf_frac fherf_ment
 sort meshid yearbin
-keep meshid4 yearbin concepts bment_* fherf_frac_w
-rename fherf_frac_w fherf_ment
+keep meshid4 yearbin concepts bment_* fherf
 merge 1:1 meshid4 yearbin using metrics_bherfment_new
 keep meshid4 yearbin concepts bment_* fherf_ment bherf_frac*
 rename bherf_frac_0 bherf_ment_0
@@ -421,6 +438,7 @@ rename meshid meshid4
 cd $outpath
 merge 1:1 meshid4 yearbin using metrics_topconcept_fieldlevel_new
 drop if _merge==2
+drop _merge
 
 replace concepts=0 if concepts==.
 replace bment_0=0 if  bment_0==.
